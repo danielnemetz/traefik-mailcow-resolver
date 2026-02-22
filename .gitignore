@@ -1,0 +1,5 @@
+# Secrets und lokale Konfiguration
+.env
+
+# Traefik-Daten (Zertifikate, Dumps)
+data/

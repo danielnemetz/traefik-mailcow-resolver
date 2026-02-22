@@ -1,0 +1,69 @@
+services:
+  traefik:
+    image: traefik:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+
+    environment:
+      - IONOS_API_KEY=${IONOS_API_KEY}
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./config:/etc/traefik
+      - ./data:/data
+
+    command:
+      - "--log.level=DEBUG"
+      - "--api.insecure=true"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.ionos.acme.email=${ACME_EMAIL}"
+
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.mailcow-cert-dummy.rule=Host(`${MAIN_DOMAIN}`)"
+      - "traefik.http.routers.mailcow-cert-dummy.tls=true"
+      - "traefik.http.routers.mailcow-cert-dummy.tls.certresolver=ionos"
+      - "traefik.http.routers.mailcow-cert-dummy.tls.domains[0].main=${MAIN_DOMAIN}"
+      - "traefik.http.routers.mailcow-cert-dummy.tls.domains[0].sans=${BASE_DOMAIN},autoconfig.${BASE_DOMAIN},autodiscover.${BASE_DOMAIN}"
+      - "traefik.http.middlewares.mailcow-autoconfig-redirect.redirectregex.permanent=true"
+      - "traefik.http.middlewares.mailcow-autoconfig-redirect.redirectregex.regex=^https?://(autoconfig|autodiscover)\\.${BASE_DOMAIN_ESCAPED}/(.*)$$"
+      - "traefik.http.middlewares.mailcow-autoconfig-redirect.redirectregex.replacement=https://${MAIN_DOMAIN}/$$2"
+      - "traefik.http.routers.mailcow-autoconfig.rule=Host(`autoconfig.${BASE_DOMAIN}`) || Host(`autodiscover.${BASE_DOMAIN}`)"
+      - "traefik.http.routers.mailcow-autoconfig.entrypoints=websecure"
+      - "traefik.http.routers.mailcow-autoconfig.tls=true"
+      - "traefik.http.routers.mailcow-autoconfig.tls.certresolver=ionos"
+      - "traefik.http.routers.mailcow-autoconfig.service=noop@internal"
+      - "traefik.http.routers.mailcow-autoconfig.middlewares=mailcow-autoconfig-redirect"
+
+  certs-dumper:
+    image: ldez/traefik-certs-dumper:latest
+    restart: unless-stopped
+
+    volumes:
+      - ./data:/traefik-data:ro
+      - ${TRAEFIK_DATA_DIR}/tmp:/dump
+      - ${MAILCOW_SSL_PATH}:/output
+      - ${MAILCOW_SSL_EXAMPLE_PATH}:/ssl-example:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./mailcow_hook.sh:/mailcow_hook.sh:ro
+
+    command:
+      - "file"
+      - "--source=/traefik-data/acme.json"
+      - "--version=v3"
+      - "--dest=/dump"
+      - "--watch"
+      - "--crt-ext=.crt"
+      - "--key-ext=.key"
+      - "--domain-subdir"
+      - "--clean=false"
+      - "--post-hook=/mailcow_hook.sh"
+
+    environment:
+      - TCD_RESTART_CONTAINERS_BY_LABEL=${TCD_RESTART_LABEL}
+      - CERT_DOMAIN=${MAIN_DOMAIN}
